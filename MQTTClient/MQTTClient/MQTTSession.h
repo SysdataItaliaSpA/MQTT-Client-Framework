@@ -252,6 +252,13 @@ typedef NS_ENUM(NSInteger, MQTTSessionEvent) {
  */
 @property (strong, nonatomic) NSString *runLoopMode;
 
+@property (strong, nonatomic) NSString *cafile;
+
+@property (strong, nonatomic) NSString *certfile;
+@property (strong, nonatomic) NSString *certpwd;
+
+
+
 /** initialises the MQTT session with default values
  @return the initialised MQTTSession object
  @code

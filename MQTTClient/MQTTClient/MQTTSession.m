@@ -221,32 +221,136 @@
     CFWriteStreamRef writeStream;
     
     CFStreamCreatePairWithSocketToHost(NULL, (__bridge CFStringRef)host, port, &readStream, &writeStream);
-    
+
     CFReadStreamSetProperty(readStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanTrue);
     CFWriteStreamSetProperty(writeStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanTrue);
-    
-    if (usingSSL) {
-        const void *keys[] = { kCFStreamSSLLevel,
-            kCFStreamSSLPeerName };
+
+    NSOutputStream * outputStream = CFBridgingRelease(writeStream);
+    NSInputStream * inputStream = CFBridgingRelease(readStream);
+
+    if(usingSSL)
+    {
+        // Read .p12 file
+        NSString *path = [[NSBundle mainBundle] pathForResource:self.certfile ofType:nil];
+        NSData *pkcs12data = [[NSData alloc] initWithContentsOfFile:path];
+
+        // Import .p12 data
+        CFArrayRef keyref = NULL;
+        OSStatus sanityChesk = SecPKCS12Import((__bridge CFDataRef)pkcs12data,
+                                               (__bridge CFDictionaryRef)[NSDictionary
+                                                                          dictionaryWithObject:self.certpwd
+                                                                          forKey:(__bridge id)kSecImportExportPassphrase],
+                                               &keyref);
+        if (sanityChesk != noErr) {
+            NSLog(@"Error while importing pkcs12 [%d]", (int)sanityChesk);
+        } else
+            NSLog(@"Success opening p12 certificate.");
+
+        // Identity
+        CFDictionaryRef identityDict = CFArrayGetValueAtIndex(keyref, 0);
+        SecIdentityRef identityRef = (SecIdentityRef)CFDictionaryGetValue(identityDict,
+                                                                          kSecImportItemIdentity);
+
+        // Cert
+        SecCertificateRef cert = NULL;
+        OSStatus status = SecIdentityCopyCertificate(identityRef, &cert);
+        if (status)
+            NSLog(@"SecIdentityCopyCertificate failed.");
+
+        // the certificates array, containing the identity then the root certificate
+        NSArray *myCerts = [[NSArray alloc] initWithObjects:(__bridge id)identityRef, (__bridge id)cert, nil];
+
+        NSMutableDictionary *SSLOptions = [[NSMutableDictionary alloc] init];
+        //    [SSLOptions setObject:[NSNumber numberWithBool:YES] forKey:(NSString *)kCFStreamSSLAllowsExpiredRoots];
+        //    [SSLOptions setObject:[NSNumber numberWithBool:YES] forKey:(NSString *)kCFStreamSSLAllowsExpiredCertificates];
+        //    [SSLOptions setObject:[NSNumber numberWithBool:YES] forKey:(NSString *)kCFStreamSSLAllowsAnyRoot];
+        //    [SSLOptions setObject:[NSNumber numberWithBool:NO] forKey:(NSString *)kCFStreamSSLValidatesCertificateChain];
+        [SSLOptions setObject:[NSNull null] forKey:(NSString *)kCFStreamSSLPeerName];
+
+
+        [SSLOptions setObject:@"kCFStreamSocketSecurityLevelTLSv1_0SSLv3" forKey:(NSString*)kCFStreamSSLLevel];
+        //    [SSLOptions setObject:(NSString *)kCFStreamSocketSecurityLevelNegotiatedSSL forKey:(NSString*)kCFStreamSSLLevel];
+        [SSLOptions setObject:(NSString *)kCFStreamSocketSecurityLevelNegotiatedSSL forKey:(NSString*)kCFStreamPropertySocketSecurityLevel];
+        [SSLOptions setObject:myCerts forKey:(NSString *)kCFStreamSSLCertificates];
+        [SSLOptions setObject:[NSNumber numberWithBool:NO] forKey:(NSString *)kCFStreamSSLIsServer];
         
-        const void *vals[] = { kCFStreamSocketSecurityLevelNegotiatedSSL,
-            kCFNull };
-        
-        CFDictionaryRef sslSettings = CFDictionaryCreate(kCFAllocatorDefault, keys, vals, 2,
-                                                         &kCFTypeDictionaryKeyCallBacks,
-                                                         &kCFTypeDictionaryValueCallBacks);
-        
-        CFReadStreamSetProperty(readStream, kCFStreamPropertySSLSettings, sslSettings);
-        CFWriteStreamSetProperty(writeStream, kCFStreamPropertySSLSettings, sslSettings);
-        
-        CFRelease(sslSettings);
+        [inputStream setProperty:SSLOptions
+                          forKey:(__bridge id)kCFStreamPropertySSLSettings];
+        [outputStream setProperty:SSLOptions
+                           forKey:(__bridge id)kCFStreamPropertySSLSettings];
+
     }
-    
-    self.encoder = [[MQTTEncoder alloc] initWithStream:(__bridge NSOutputStream*)writeStream
+
+//    // Read .p12 file
+//    NSString *path = [[NSBundle mainBundle] pathForResource:@"certificate" ofType:@"p12"];
+//    NSData *pkcs12data = [[NSData alloc] initWithContentsOfFile:path];
+//
+//    // Import .p12 data
+//    CFArrayRef keyref = NULL;
+//    OSStatus sanityChesk = SecPKCS12Import((__bridge CFDataRef)pkcs12data,
+//                                           (__bridge CFDictionaryRef)[NSDictionary
+//                                                                      dictionaryWithObject:@"12345678"
+//                                                                      forKey:(__bridge id)kSecImportExportPassphrase],
+//                                           &keyref);
+//    if (sanityChesk != noErr)
+//    {
+//        NSLog(@"Error while importing pkcs12 [%d]", (int)sanityChesk);
+//    }
+//    else
+//    {
+//        NSLog(@"Success opening p12 certificate.");
+//    }
+//
+//    // Identity
+//    CFDictionaryRef identityDict = CFArrayGetValueAtIndex(keyref, 0);
+//    SecIdentityRef identityRef = (SecIdentityRef)CFDictionaryGetValue(identityDict,
+//                                                                      kSecImportItemIdentity);
+//
+//    // Cert
+//    SecCertificateRef cert = NULL;
+//    OSStatus status = SecIdentityCopyCertificate(identityRef, &cert);
+//    if (status)
+//        NSLog(@"SecIdentityCopyCertificate failed.");
+//    // the certificates array, containing the identity then the root certificate
+//    NSArray *myCerts = [[NSArray alloc] initWithObjects:(__bridge id)identityRef, (__bridge id)cert, nil];
+////    NSArray *myCerts = [[NSArray alloc] initWithObjects:(__bridge id)identityRef, nil];
+//
+//    CFWriteStreamSetProperty(writeStream, kCFStreamSSLCertificates, (__bridge CFArrayRef)myCerts);
+//
+
+//    CFReadStreamSetProperty(readStream,
+//                            kCFStreamPropertySocketSecurityLevel,
+//                            kCFStreamSocketSecurityLevelTLSv1);
+
+//    CFReadStreamSetProperty(readStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanTrue);
+//    CFWriteStreamSetProperty(writeStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanTrue);
+//
+//    CFReadStreamSetProperty(readStream, kCFStreamPropertySocketSecurityLevel, kCFStreamSocketSecurityLevelNegotiatedSSL);
+//    CFWriteStreamSetProperty(writeStream, kCFStreamPropertySocketSecurityLevel, kCFStreamSocketSecurityLevelNegotiatedSSL);
+//
+//
+//    if (usingSSL) {
+//        const void *keys[] = { kCFStreamSSLLevel,
+//            kCFStreamSSLPeerName, kCFStreamSSLValidatesCertificateChain };
+//        
+//        const void *vals[] = { kCFStreamSocketSecurityLevelNegotiatedSSL,
+//            kCFNull, kCFBooleanFalse };
+//        
+//        CFDictionaryRef sslSettings = CFDictionaryCreate(kCFAllocatorDefault, keys, vals, 2,
+//                                                         &kCFTypeDictionaryKeyCallBacks,
+//                                                         &kCFTypeDictionaryValueCallBacks);
+//        
+//        CFReadStreamSetProperty(readStream, kCFStreamPropertySSLSettings, sslSettings);
+//        CFWriteStreamSetProperty(writeStream, kCFStreamPropertySSLSettings, sslSettings);
+//        
+//        CFRelease(sslSettings);
+//    }
+
+    self.encoder = [[MQTTEncoder alloc] initWithStream:outputStream
                                                runLoop:self.runLoop
                                            runLoopMode:self.runLoopMode];
     
-    self.decoder = [[MQTTDecoder alloc] initWithStream:(__bridge NSInputStream*)readStream
+    self.decoder = [[MQTTDecoder alloc] initWithStream:inputStream
                                                runLoop:self.runLoop
                                            runLoopMode:self.runLoopMode];
     
